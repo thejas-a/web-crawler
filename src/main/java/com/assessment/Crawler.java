@@ -1,39 +1,21 @@
 package com.assessment;
 
-import org.jsoup.Jsoup;
-import org.jsoup.nodes.Document;
-import org.jsoup.select.Elements;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
+
+import static com.assessment.utils.UrlUtils.*;
 
 public class Crawler {
 
     public String url;
     private String domain;
-
-    //extract domain name from the given url
-    private static String extractDomain(String url){
-        String regex = "[a-zA-Z]+\\.(com|net|io|ai)";
-        Pattern pattern = Pattern.compile(regex);
-        Matcher matcher = pattern.matcher(url);
-        if(matcher.find()){
-            return matcher.group(0);
-        }else{
-            return ".com";  //defaults to .com
-        }
-    }
 
     public Crawler(String url){
         this.url = url;
@@ -41,20 +23,22 @@ public class Crawler {
     }
 
 
+    /**
+     * Check if the url belongs to the same domain
+     * @param url
+     * @return
+     */
     private boolean isSameDomain(String url){
         return url.contains(this.domain);
     }
 
-    private boolean validHttpUrl(String url){
-        return url.contains("https") || url.contains("http");
-    }
 
-    private Set<String> extractLinks(String htmlContent){
-        Document document = Jsoup.parse(htmlContent);
-        Elements elements = document.select("a[href]");
-        return elements.stream().map(e -> e.attr("abs:href")).collect(Collectors.toSet());
-    }
-
+    /**
+     * Parse response body into a string
+     * @param reader
+     * @return
+     * @throws IOException
+     */
     private String readHtmlContent(BufferedReader reader) throws IOException {
         StringBuilder content = new StringBuilder();
         String line;
@@ -65,33 +49,40 @@ public class Crawler {
     }
 
     public void crawl(){
-        LinkedList<String> crawledUrls = new LinkedList<>();
-        Queue<String> queue = new LinkedList<>();
-        Set<String> visited = new HashSet<>();
+        LinkedList<String> crawledUrls = new LinkedList<>();    //stores websites that are crawled successfully
+        Queue<String> queue = new LinkedList<>();   //to process each website in the order
         URL website = null;
         HttpURLConnection connection = null;
-        queue.add(this.url);
+        queue.add(sanitizeUrl(this.url));
 
         while(!queue.isEmpty()){
             String url = queue.poll();
-            visited.add(url);
-
+            //exception handling to continue crawling of next url from queue if present url throws any exceptions
             try {
                 website = new URL(url);
                 connection = (HttpURLConnection) website.openConnection();
                 connection.setRequestMethod("GET");
                 int responseCode = connection.getResponseCode();
                 if(responseCode == HttpURLConnection.HTTP_OK){
+                    //crawl website only for which we were able to get OK response
                     System.out.println("Crawling: "+url);
                     crawledUrls.add(url);
                     try(BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))){
-                        String htmlContent = this.readHtmlContent(reader);
-                        Set<String> links = this.extractLinks(htmlContent);
+                        String htmlContent = this.readHtmlContent(reader);      //read response body
+                        Set<String> links = extractLinks(htmlContent);     //parse html content and extract links
                         for(String link : links){
-                            if(this.validHttpUrl(link) && this.isSameDomain(link) && !visited.contains(link))
+                            //prechecks of URLs before adding to queue
+                            /*
+                            1. It should be http url
+                            2. It should be of same domain
+                            3. It must not be already present in queue for processing
+                            4. It must not have already been crawled
+                             */
+                            link = sanitizeUrl(link); //make sure we sanitize url
+                            if(validHttpUrl(link) && this.isSameDomain(link)
+                                    && !queue.contains(link) && !crawledUrls.contains(link))
                                 queue.add(link);
                         }
-
                     }
                     catch (IOException e){
                         System.err.println("Exception in getting response for URL: "+url);
@@ -105,17 +96,20 @@ public class Crawler {
             catch (IOException e) {
                 System.err.println("Exception in getting response for URL: "+url);
             }
+            catch (Exception e){
+                System.err.println("Generic Exception during crawling of URL: "+url);
+            }
         }
         if(connection != null)
             connection.disconnect();
         System.out.println("\n---------------------------------------------\n");
-        System.out.println("**** Crawling Finished ****");
+        System.out.println("**** Crawling Finished ****\n");
         System.out.println("Following links were visited");
         crawledUrls.forEach(System.out::println);
     }
 
     public static void main(String[] args) {
-        Crawler crawler = new Crawler("https://www.teya.com");
+        Crawler crawler = new Crawler("https://www.teya.com/");
         crawler.crawl();
     }
 }
